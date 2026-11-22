@@ -60,7 +60,9 @@ function cleanNumberString(value) {
   return Number.isFinite(number) && number > 0 ? String(number) : '';
 }
 
-function clampInt(value, min, max, fallback) {
+function normalizeOptionalInt(value, min, max, fallback) {
+  if (value === null || value === '') return null;
+  if (value === undefined) return fallback;
   const number = Number.parseInt(value, 10);
   if (!Number.isFinite(number)) return fallback;
   return Math.min(max, Math.max(min, number));
@@ -161,8 +163,18 @@ export function normalizeProfile(raw, fallbackId = 'p1') {
     conditions: Array.isArray(raw.conditions)
       ? [...new Set(raw.conditions.filter((condition) => CONDITION_IDS.has(condition)))]
       : [],
-    defaultCycleLength: clampInt(raw.defaultCycleLength, 15, 120, base.defaultCycleLength),
-    defaultPeriodLength: clampInt(raw.defaultPeriodLength, 1, 20, base.defaultPeriodLength),
+    defaultCycleLength: normalizeOptionalInt(
+      raw.defaultCycleLength,
+      15,
+      120,
+      base.defaultCycleLength
+    ),
+    defaultPeriodLength: normalizeOptionalInt(
+      raw.defaultPeriodLength,
+      1,
+      20,
+      base.defaultPeriodLength
+    ),
     lastPeriodStart: isDateKey(raw.lastPeriodStart) ? raw.lastPeriodStart : null,
     postpartumDate: isDateKey(raw.postpartumDate) ? raw.postpartumDate : base.postpartumDate,
     breastfeeding: BREASTFEEDING_IDS.has(raw.breastfeeding)

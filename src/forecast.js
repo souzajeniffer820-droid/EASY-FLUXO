@@ -143,7 +143,9 @@ function currentPhase(cycleDay, cycleLength, avgPeriodLength, todayKey, fertileW
   if (fertileWindow && todayKey >= fertileWindow.startKey && todayKey <= fertileWindow.endKey) {
     return PHASES.fertil;
   }
-  if (cycleDay <= Math.max(1, avgPeriodLength)) return PHASES.menstrual;
+  if (avgPeriodLength != null && cycleDay <= Math.max(1, avgPeriodLength)) {
+    return PHASES.menstrual;
+  }
   if (cycleDay > cycleLength) return PHASES.estendido;
   if (fertileWindow && todayKey < fertileWindow.startKey) return PHASES.folicular;
   return PHASES.lutea;
@@ -176,12 +178,27 @@ export function computeCycleForecast(profile, analytics, today = new Date()) {
     };
   }
 
+  if (
+    analytics.avgCycleLength == null ||
+    !Number.isFinite(Number(analytics.avgCycleLength)) ||
+    Number(analytics.avgCycleLength) <= 0
+  ) {
+    return {
+      ...empty,
+      message:
+        'Informe a duração média do ciclo ou registre mais ciclos para estimar a próxima menstruação e a ovulação.',
+    };
+  }
+
   const todayDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   const todayKey = formatDateKey(todayDate);
   const lastStart = parseDateKey(analytics.lastPeriodStart);
 
-  const cycleLength = Math.min(99, Math.max(15, Math.round(analytics.avgCycleLength || 28)));
-  const avgPeriodLength = Math.max(1, Math.round(analytics.avgPeriodLength || 5));
+  const cycleLength = Math.min(99, Math.max(15, Math.round(Number(analytics.avgCycleLength))));
+  const avgPeriodLength =
+    analytics.avgPeriodLength == null
+      ? null
+      : Math.max(1, Math.round(Number(analytics.avgPeriodLength)));
   const cycleDay = Math.max(1, diffDays(lastStart, todayDate) + 1);
 
   const spread = analytics.hasRealData

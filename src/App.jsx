@@ -79,6 +79,12 @@ const ACTIVE_KEY = 'ciclolivre_v3_active';
 const CORRUPT_KEY = 'ciclolivre_v3_corrupted_backup';
 const PERIOD_FLOWS = ['Leve', 'Moderado', 'Intenso', 'Coágulos'];
 
+function clampOptionalInteger(value, min, max) {
+  const parsed = Number.parseInt(String(value).trim(), 10);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.min(max, Math.max(min, parsed));
+}
+
 /* ------------------------------------------------------------------ */
 /* Dados iniciais                                                      */
 /* ------------------------------------------------------------------ */
@@ -166,8 +172,8 @@ function computeCycleAnalytics(profile) {
   if (periodDays.length === 0) {
     return {
       cycles: [],
-      avgCycleLength: profile.defaultCycleLength || 28,
-      avgPeriodLength: profile.defaultPeriodLength || 5,
+      avgCycleLength: profile.defaultCycleLength ?? null,
+      avgPeriodLength: profile.defaultPeriodLength ?? null,
       variation: 0,
       lastPeriodStart: profile.lastPeriodStart || null,
       hasRealData: false,
@@ -206,11 +212,12 @@ function computeCycleAnalytics(profile) {
   const avgCycleLength =
     completedLengths.length > 0
       ? Math.round(completedLengths.reduce((a, b) => a + b, 0) / completedLengths.length)
-      : profile.defaultCycleLength || 28;
+      : (profile.defaultCycleLength ?? null);
 
-  const avgPeriodLength = Math.round(
-    parsedCycles.reduce((acc, c) => acc + c.periodLength, 0) / parsedCycles.length
-  );
+  const avgPeriodLength =
+    parsedCycles.length > 0
+      ? Math.round(parsedCycles.reduce((acc, c) => acc + c.periodLength, 0) / parsedCycles.length)
+      : (profile.defaultPeriodLength ?? null);
 
   const variation =
     completedLengths.length > 1 ? Math.max(...completedLengths) - Math.min(...completedLengths) : 0;
@@ -340,8 +347,23 @@ function computeTodayStatus(profile, analytics) {
   const lastStart = parseDateKey(analytics.lastPeriodStart);
   const cycleDay = Math.max(1, diffDays(lastStart, today) + 1);
   const avgLen = analytics.avgCycleLength;
-  const ovulDay = Math.max(10, avgLen - 14);
-  const daysToNext = avgLen - cycleDay + 1;
+  if (!Number.isFinite(Number(avgLen)) || Number(avgLen) <= 0) {
+    return {
+      badge: profile.lifeMode === 'ttc' ? 'Tentando Engravidar' : 'Ciclo Menstrual',
+      badgeColor:
+        profile.lifeMode === 'ttc'
+          ? 'bg-rose-100 text-rose-800'
+          : 'bg-fuchsia-100 text-fuchsia-800',
+      headline: `Dia ${cycleDay} do ciclo`,
+      subtext:
+        'Informe a duração média do ciclo ou registre mais ciclos para receber previsões.',
+      phase: 'regular',
+      lastStart,
+    };
+  }
+  const avgLenNumber = Number(avgLen);
+  const ovulDay = Math.max(10, avgLenNumber - 14);
+  const daysToNext = avgLenNumber - cycleDay + 1;
 
   let subtext = '';
   if (profile.lifeMode === 'ttc') {
@@ -355,13 +377,13 @@ function computeTodayStatus(profile, analytics) {
         ? 'Atenção: aguardando espermograma de confirmação.'
         : 'Risco de gravidez desativado pelo método definitivo.';
     subtext = `${note} Próximo ciclo previsto em ~${Math.max(1, daysToNext)} dias.`;
-  } else if (hasPCOS && cycleDay > avgLen) {
+  } else if (hasPCOS && cycleDay > avgLenNumber) {
     subtext = 'Ciclo alongado (comum na SOP) — alerta rígido de atraso desativado.';
   } else {
     subtext =
       daysToNext > 0
-        ? `Próxima menstruação estimada em ${daysToNext} dias (média de ${avgLen} dias).`
-        : `Ciclo no dia ${cycleDay} (média habitual de ${avgLen} dias).`;
+        ? `Próxima menstruação estimada em ${daysToNext} dias (média de ${avgLenNumber} dias).`
+        : `Ciclo no dia ${cycleDay} (média habitual de ${avgLenNumber} dias).`;
   }
 
   return {
@@ -372,7 +394,7 @@ function computeTodayStatus(profile, analytics) {
     subtext,
     phase: 'regular',
     ovulDay,
-    avgLen,
+    avgLen: avgLenNumber,
     lastStart,
   };
 }
@@ -392,8 +414,10 @@ function buildReportText(profile, analytics, weightHistory) {
   if (condLabels) text += `Condições relatadas: ${condLabels}\n`;
 
   text += '\n--- ANÁLISE DO CICLO ---\n';
-  text += `• Duração média do ciclo: ${analytics.avgCycleLength} dias\n`;
-  text += `• Duração média da menstruação: ${analytics.avgPeriodLength} dias\n`;
+  const cycleLength = analytics.avgCycleLength;
+  const periodLength = analytics.avgPeriodLength;
+  text += `• Duração média do ciclo: ${cycleLength == null ? 'Não informada' : `${cycleLength} dias`}\n`;
+  text += `• Duração média da menstruação: ${periodLength == null ? 'Não informada' : `${periodLength} dias`}\n`;
   text += `• Variação entre ciclos: ${analytics.variation} dias\n`;
   if (analytics.lastPeriodStart) {
     text += `• Último início de sangramento: ${formatBR(analytics.lastPeriodStart)}\n`;
@@ -989,16 +1013,20 @@ function TodayTab({
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-bold text-stone-900">Resumo do ciclo</h3>
           <span className="text-[11px] text-stone-500">
-            {analytics.hasRealData ? 'Baseado no seu histórico' : 'Valores padrão'}
+            {analytics.hasRealData
+              ? 'Baseado no seu histórico'
+              : analytics.avgCycleLength != null || analytics.avgPeriodLength != null
+                ? 'Valores padrão'
+                : 'Não informado'}
           </span>
         </div>
         <div className="grid grid-cols-3 gap-2">
           <div className="rounded-xl bg-stone-50 border border-stone-100 p-2.5 text-center">
-            <p className="text-xl font-bold text-stone-900">{analytics.avgCycleLength}</p>
+            <p className="text-xl font-bold text-stone-900">{analytics.avgCycleLength ?? '—'}</p>
             <p className="text-[10px] text-stone-500 mt-0.5">dias de ciclo</p>
           </div>
           <div className="rounded-xl bg-stone-50 border border-stone-100 p-2.5 text-center">
-            <p className="text-xl font-bold text-stone-900">{analytics.avgPeriodLength}</p>
+            <p className="text-xl font-bold text-stone-900">{analytics.avgPeriodLength ?? '—'}</p>
             <p className="text-[10px] text-stone-500 mt-0.5">dias de fluxo</p>
           </div>
           <div className="rounded-xl bg-stone-50 border border-stone-100 p-2.5 text-center">
@@ -1117,6 +1145,7 @@ function CalendarTab({
   const predicted = useMemo(() => {
     const set = new Set();
     if (!analytics.lastPeriodStart) return set;
+    if (analytics.avgCycleLength == null || analytics.avgPeriodLength == null) return set;
     if (
       profile.lifeMode === 'pregnant' ||
       profile.lifeMode === 'postpartum' ||
@@ -1144,6 +1173,7 @@ function CalendarTab({
   const fertile = useMemo(() => {
     const empty = { days: new Set(), ovulation: null, enabled: false };
     if (!analytics.lastPeriodStart) return empty;
+    if (analytics.avgCycleLength == null) return empty;
     if (
       profile.lifeMode === 'pregnant' ||
       profile.lifeMode === 'postpartum' ||
@@ -1743,35 +1773,63 @@ function ProfileTab({
         <div className="grid grid-cols-2 gap-2">
           <Field label="Ciclo médio (dias)">
             <input
-              type="number"
+              type="text"
               inputMode="numeric"
-              value={profile.defaultCycleLength}
+              pattern="[0-9]*"
+              maxLength={3}
+              placeholder="Não informado"
+              value={profile.defaultCycleLength ?? ''}
               onChange={(e) =>
+                /^\d*$/.test(e.target.value) &&
                 updateProfile({
-                  defaultCycleLength: Math.min(
-                    120,
-                    Math.max(15, parseInt(e.target.value || '28', 10) || 28)
-                  ),
+                  defaultCycleLength: e.target.value === '' ? null : e.target.value,
+                })
+              }
+              onFocus={(e) => e.target.select()}
+              onBlur={(e) =>
+                updateProfile({
+                  defaultCycleLength: clampOptionalInteger(e.target.value, 15, 120),
                 })
               }
               className={inputClass}
             />
+            <button
+              type="button"
+              onClick={() => updateProfile({ defaultCycleLength: null })}
+              className="mt-1 text-[10px] font-medium text-rose-700 underline underline-offset-2"
+            >
+              Não sei / deixar em branco
+            </button>
           </Field>
           <Field label="Menstruação (dias)">
             <input
-              type="number"
+              type="text"
               inputMode="numeric"
-              value={profile.defaultPeriodLength}
+              pattern="[0-9]*"
+              maxLength={2}
+              placeholder="Não informado"
+              value={profile.defaultPeriodLength ?? ''}
               onChange={(e) =>
+                /^\d*$/.test(e.target.value) &&
                 updateProfile({
-                  defaultPeriodLength: Math.min(
-                    20,
-                    Math.max(1, parseInt(e.target.value || '5', 10) || 5)
-                  ),
+                  defaultPeriodLength: e.target.value === '' ? null : e.target.value,
+                })
+              }
+              onFocus={(e) => e.target.select()}
+              onBlur={(e) =>
+                updateProfile({
+                  defaultPeriodLength: clampOptionalInteger(e.target.value, 1, 20),
                 })
               }
               className={inputClass}
             />
+            <button
+              type="button"
+              onClick={() => updateProfile({ defaultPeriodLength: null })}
+              className="mt-1 text-[10px] font-medium text-rose-700 underline underline-offset-2"
+            >
+              Não sei / deixar em branco
+            </button>
           </Field>
         </div>
         <p className="text-[10px] text-stone-400 mt-2 leading-relaxed">

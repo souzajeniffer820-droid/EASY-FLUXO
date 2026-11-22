@@ -63,8 +63,10 @@ export function secondsToClock(total) {
  * Sem isso, quem fica semanas sem registrar vê a previsão "congelada" no passado.
  */
 export function nextCycleStart(lastPeriodStartKey, avgCycleLength, today = new Date()) {
-  if (!lastPeriodStartKey) return null;
-  const length = Math.max(15, Math.min(120, Number(avgCycleLength) || 28));
+  if (!lastPeriodStartKey || avgCycleLength == null || avgCycleLength === '') return null;
+  const cycleLength = Number(avgCycleLength);
+  if (!Number.isFinite(cycleLength) || cycleLength <= 0) return null;
+  const length = Math.max(15, Math.min(120, cycleLength));
   let next = addDays(parseDateKey(lastPeriodStartKey), length);
   let guard = 0;
   while (diffDays(next, today) > 0 && guard < 120) {

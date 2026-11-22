@@ -49,7 +49,11 @@ export default function WelcomeSheet({ onFinish, onSkip }) {
       lifeMode,
       onboarded: true,
       heightCm: heightCm.trim(),
-      defaultCycleLength: Number.isFinite(length) ? Math.min(120, Math.max(15, length)) : 28,
+      defaultCycleLength: cycleLength.trim()
+        ? Number.isFinite(length)
+          ? Math.min(120, Math.max(15, length))
+          : 28
+        : null,
     };
 
     if (lifeMode === 'pregnant') patch.pregnancyLMP = date;
@@ -180,11 +184,18 @@ export default function WelcomeSheet({ onFinish, onSkip }) {
                 inputMode="numeric"
                 value={cycleLength}
                 onChange={(event) => setCycleLength(event.target.value)}
-                placeholder="28"
+                placeholder="Não informado"
                 className={inputClass}
               />
             </div>
           </div>
+          <button
+            type="button"
+            onClick={() => setCycleLength('')}
+            className="mt-1 text-[10px] font-medium text-rose-700 underline underline-offset-2"
+          >
+            Não sei / deixar em branco
+          </button>
 
           {error && (
             <p className="text-xs font-medium text-rose-600" role="alert">
