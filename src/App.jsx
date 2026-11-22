@@ -2817,6 +2817,18 @@ export default function App() {
         </div>
       </nav>
 
+      {logOpen && (
+        <LogSheet
+          profile={profile}
+          dateKey={selectedDateKey}
+          onChangeDate={setSelectedDateKey}
+          onClose={() => setLogOpen(false)}
+          toggleOption={toggleOption}
+          updateDayField={updateDayField}
+          clearDay={clearDay}
+        />
+      )}
+
       {batchOpen && selectedDays.length > 0 && (
         <BatchLogSheet
           profile={profile}
