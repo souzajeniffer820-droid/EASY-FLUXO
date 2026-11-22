@@ -654,7 +654,7 @@ function CycleForecastCard({ forecast }) {
       <SectionCard>
         <div className="flex items-center gap-2 mb-2">
           <Sparkles className="w-4 h-4 text-rose-600" />
-          <h3 className="text-sm font-bold text-stone-900">Previs├úo do ciclo</h3>
+          <h3 className="text-sm font-bold text-stone-900">Previsão do ciclo</h3>
         </div>
         <p className="text-xs text-stone-600 leading-relaxed">{forecast.message}</p>
       </SectionCard>
@@ -671,21 +671,21 @@ function CycleForecastCard({ forecast }) {
       ? 'Hoje'
       : nextPeriod.daysUntil > 0
         ? `Em ${nextPeriod.daysUntil} ${nextPeriod.daysUntil === 1 ? 'dia' : 'dias'}`
-        : `Atrasada h├í ${Math.abs(nextPeriod.daysUntil)} ${Math.abs(nextPeriod.daysUntil) === 1 ? 'dia' : 'dias'}`;
+        : `Atrasada há ${Math.abs(nextPeriod.daysUntil)} ${Math.abs(nextPeriod.daysUntil) === 1 ? 'dia' : 'dias'}`;
 
   const ovulationHeadline =
     ovulation.daysUntil === 0
       ? 'Hoje'
       : ovulation.daysUntil > 0
         ? `Em ${ovulation.daysUntil} ${ovulation.daysUntil === 1 ? 'dia' : 'dias'}`
-        : 'J├í passou';
+        : 'Já passou';
 
   return (
     <SectionCard className="bg-gradient-to-br from-rose-50/70 via-white to-amber-50/70 border-rose-100">
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2">
           <Sparkles className="w-4 h-4 text-rose-600" />
-          <h3 className="text-sm font-bold text-stone-900">Previs├úo do ciclo</h3>
+          <h3 className="text-sm font-bold text-stone-900">Previsão do ciclo</h3>
         </div>
         {confidence && (
           <span
@@ -710,13 +710,13 @@ function CycleForecastCard({ forecast }) {
           <div className="flex items-center gap-1.5 text-rose-600">
             <Droplets className="w-3.5 h-3.5" />
             <span className="text-[10px] font-semibold uppercase tracking-wide">
-              Pr├│xima menstrua├º├úo
+              Próxima menstruação
             </span>
           </div>
           <p className="mt-1 text-base font-bold text-stone-900 leading-tight">{periodHeadline}</p>
           <p className="text-[11px] text-stone-600 mt-0.5">{longDate(nextPeriod.startKey)}</p>
           <p className="text-[10px] text-stone-500 mt-1">
-            Janela prov├ível: {shortDate(nextPeriod.windowStartKey)} ÔÇô {shortDate(nextPeriod.windowEndKey)}
+            Janela provável: {shortDate(nextPeriod.windowStartKey)} – {shortDate(nextPeriod.windowEndKey)}
           </p>
         </div>
 
@@ -724,7 +724,7 @@ function CycleForecastCard({ forecast }) {
           <div className="flex items-center gap-1.5 text-amber-600">
             <Heart className="w-3.5 h-3.5" />
             <span className="text-[10px] font-semibold uppercase tracking-wide">
-              Ovula├º├úo estimada
+              Ovulação estimada
             </span>
           </div>
           <p className="mt-1 text-base font-bold text-stone-900 leading-tight">
@@ -732,7 +732,7 @@ function CycleForecastCard({ forecast }) {
           </p>
           <p className="text-[11px] text-stone-600 mt-0.5">{longDate(ovulation.dateKey)}</p>
           <p className="text-[10px] text-stone-500 mt-1">
-            Janela f├®rtil: {shortDate(fertileWindow.startKey)} ÔÇô {shortDate(fertileWindow.endKey)}
+            Janela fértil: {shortDate(fertileWindow.startKey)} – {shortDate(fertileWindow.endKey)}
           </p>
         </div>
       </div>
@@ -741,7 +741,7 @@ function CycleForecastCard({ forecast }) {
         <div className="mt-2 flex gap-2 p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-[11px]">
           <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
           <p className="leading-relaxed">
-            Voc├¬ est├í na janela f├®rtil estimada (os ~6 dias de maior chance de concep├º├úo).
+            Você está na janela fértil estimada (os ~6 dias de maior chance de concepção).
           </p>
         </div>
       )}
@@ -750,7 +750,7 @@ function CycleForecastCard({ forecast }) {
         <p className="text-[10px] text-stone-500 mt-2 leading-relaxed">{confidence.note}</p>
       )}
       <p className="text-[10px] text-stone-400 mt-1 leading-relaxed">
-        Estimativas baseadas no seu hist├│rico. N├úo servem como m├®todo contraceptivo.
+        Estimativas baseadas no seu histórico. Não servem como método contraceptivo.
       </p>
     </SectionCard>
   );
