@@ -3,6 +3,7 @@ import { App as CapacitorApp } from '@capacitor/app';
 import {
   Calendar as CalendarIcon,
   Baby,
+  Droplets,
   Heart,
   Sparkles,
   FileText,
