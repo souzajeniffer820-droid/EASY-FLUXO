@@ -2269,7 +2269,7 @@ export default function App() {
   const [importOpen, setImportOpen] = useState(false);
 
   const [lockConfig, setLockConfig] = useState(readLockConfig);
-  const [locked, setLocked] = useState(() => readLockConfig().enabled);
+  const [locked, setLocked] = useState(false);
   const [pinSheet, setPinSheet] = useState(null);
   const [forgotOpen, setForgotOpen] = useState(false);
   const lastActiveRef = useRef(Date.now());
