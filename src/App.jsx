@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
 import {
   Calendar as CalendarIcon,
+  Baby,
   Heart,
   Sparkles,
   FileText,
@@ -70,6 +71,7 @@ import PinSheet from './PinSheet';
 import WelcomeSheet from './WelcomeSheet';
 import { ExportSheet, ImportSheet } from './BackupSheets';
 import { Sparkline } from './charts';
+import { computeCycleForecast } from './forecast';
 
 const STORAGE_KEY = 'ciclolivre_v3_profiles';
 const ACTIVE_KEY = 'ciclolivre_v3_active';
@@ -643,6 +645,124 @@ function TrendsCard({ profile, analytics }) {
   );
 }
 
+function CycleForecastCard({ forecast }) {
+  if (!forecast || forecast.status === 'blocked') return null;
+
+  if (forecast.status !== 'ready') {
+    return (
+      <SectionCard>
+        <div className="flex items-center gap-2 mb-2">
+          <Sparkles className="w-4 h-4 text-rose-600" />
+          <h3 className="text-sm font-bold text-stone-900">Previs├úo do ciclo</h3>
+        </div>
+        <p className="text-xs text-stone-600 leading-relaxed">{forecast.message}</p>
+      </SectionCard>
+    );
+  }
+
+  const { nextPeriod, ovulation, fertileWindow, confidence, phase, cycleDay } = forecast;
+  const shortDate = (key) => formatBR(key, { day: '2-digit', month: '2-digit' });
+  const longDate = (key) =>
+    parseDateKey(key).toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: 'short' });
+
+  const periodHeadline =
+    nextPeriod.daysUntil === 0
+      ? 'Hoje'
+      : nextPeriod.daysUntil > 0
+        ? `Em ${nextPeriod.daysUntil} ${nextPeriod.daysUntil === 1 ? 'dia' : 'dias'}`
+        : `Atrasada h├í ${Math.abs(nextPeriod.daysUntil)} ${Math.abs(nextPeriod.daysUntil) === 1 ? 'dia' : 'dias'}`;
+
+  const ovulationHeadline =
+    ovulation.daysUntil === 0
+      ? 'Hoje'
+      : ovulation.daysUntil > 0
+        ? `Em ${ovulation.daysUntil} ${ovulation.daysUntil === 1 ? 'dia' : 'dias'}`
+        : 'J├í passou';
+
+  return (
+    <SectionCard className="bg-gradient-to-br from-rose-50/70 via-white to-amber-50/70 border-rose-100">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Sparkles className="w-4 h-4 text-rose-600" />
+          <h3 className="text-sm font-bold text-stone-900">Previs├úo do ciclo</h3>
+        </div>
+        {confidence && (
+          <span
+            className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border shrink-0 ${confidence.className}`}
+          >
+            {confidence.label}
+          </span>
+        )}
+      </div>
+
+      {phase && (
+        <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+          <span className={`text-[11px] font-medium px-2 py-0.5 rounded-md border ${phase.className}`}>
+            {phase.label}
+          </span>
+          <span className="text-[11px] text-stone-500">Dia {cycleDay} do ciclo</span>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-2 mt-3">
+        <div className="rounded-xl bg-white/80 border border-rose-100 p-3">
+          <div className="flex items-center gap-1.5 text-rose-600">
+            <Droplets className="w-3.5 h-3.5" />
+            <span className="text-[10px] font-semibold uppercase tracking-wide">
+              Pr├│xima menstrua├º├úo
+            </span>
+          </div>
+          <p className="mt-1 text-base font-bold text-stone-900 leading-tight">{periodHeadline}</p>
+          <p className="text-[11px] text-stone-600 mt-0.5">{longDate(nextPeriod.startKey)}</p>
+          <p className="text-[10px] text-stone-500 mt-1">
+            Janela prov├ível: {shortDate(nextPeriod.windowStartKey)} ÔÇô {shortDate(nextPeriod.windowEndKey)}
+          </p>
+        </div>
+
+        <div className="rounded-xl bg-white/80 border border-amber-100 p-3">
+          <div className="flex items-center gap-1.5 text-amber-600">
+            <Heart className="w-3.5 h-3.5" />
+            <span className="text-[10px] font-semibold uppercase tracking-wide">
+              Ovula├º├úo estimada
+            </span>
+          </div>
+          <p className="mt-1 text-base font-bold text-stone-900 leading-tight">
+            {ovulationHeadline}
+          </p>
+          <p className="text-[11px] text-stone-600 mt-0.5">{longDate(ovulation.dateKey)}</p>
+          <p className="text-[10px] text-stone-500 mt-1">
+            Janela f├®rtil: {shortDate(fertileWindow.startKey)} ÔÇô {shortDate(fertileWindow.endKey)}
+          </p>
+        </div>
+      </div>
+
+      {fertileWindow.containsToday && (
+        <div className="mt-2 flex gap-2 p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-[11px]">
+          <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+          <p className="leading-relaxed">
+            Voc├¬ est├í na janela f├®rtil estimada (os ~6 dias de maior chance de concep├º├úo).
+          </p>
+        </div>
+      )}
+
+      {confidence?.note && (
+        <p className="text-[10px] text-stone-500 mt-2 leading-relaxed">{confidence.note}</p>
+      )}
+      <p className="text-[10px] text-stone-400 mt-1 leading-relaxed">
+        Estimativas baseadas no seu hist├│rico. N├úo servem como m├®todo contraceptivo.
+      </p>
+    </SectionCard>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Aba: Hoje                                                           */
+/* ------------------------------------------------------------------ */
+
+/* ------------------------------------------------------------------ */
+/* Aba: Hoje                                                           */
+/* ------------------------------------------------------------------ */
+
 /* ------------------------------------------------------------------ */
 /* Aba: Hoje                                                           */
 /* ------------------------------------------------------------------ */
@@ -651,6 +771,7 @@ function TodayTab({
   profile,
   analytics,
   status,
+  forecast,
   todayLog,
   recommendedArticle,
   latestWeight,
@@ -724,6 +845,8 @@ function TodayTab({
           </button>
         </div>
       </SectionCard>
+
+      <CycleForecastCard forecast={forecast} />
 
       <SectionCard>
         <div className="flex items-center justify-between mb-3">
@@ -967,7 +1090,19 @@ function TodayTab({
 /* Aba: Calendário                                                     */
 /* ------------------------------------------------------------------ */
 
-function CalendarTab({ profile, analytics, currentMonth, setCurrentMonth, onDayClick, selectedDateKey }) {
+function CalendarTab({
+  profile,
+  analytics,
+  currentMonth,
+  setCurrentMonth,
+  onDayClick,
+  selectedDateKey,
+  selectionMode,
+  selectedDays,
+  onToggleSelectionMode,
+  onToggleDay,
+  onOpenBatch,
+}) {
   const year = currentMonth.getFullYear();
   const month = currentMonth.getMonth();
   const firstDay = new Date(year, month, 1);
@@ -1067,6 +1202,24 @@ function CalendarTab({ profile, analytics, currentMonth, setCurrentMonth, onDayC
           </button>
         </div>
 
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <p className="text-[11px] text-stone-500 leading-snug">
+            {selectionMode
+              ? 'Toque nos dias e aplique as mesmas opções de uma vez.'
+              : 'Toque em um dia para registrar.'}
+          </p>
+          <button
+            onClick={onToggleSelectionMode}
+            className={`shrink-0 text-[11px] font-semibold px-2.5 py-1.5 rounded-lg border transition ${
+              selectionMode
+                ? 'bg-stone-900 text-white border-stone-900'
+                : 'bg-white text-stone-600 border-stone-200 active:bg-stone-50'
+            }`}
+          >
+            {selectionMode ? 'Cancelar seleção' : 'Selecionar dias'}
+          </button>
+        </div>
+
         <div className="grid grid-cols-7 gap-1 mb-1">
           {['D', 'S', 'T', 'Q', 'Q', 'S', 'S'].map((d, i) => (
             <div key={`${d}-${i}`} className="text-center text-[10px] font-semibold text-stone-400 py-1">
@@ -1081,7 +1234,8 @@ function CalendarTab({ profile, analytics, currentMonth, setCurrentMonth, onDayC
             const key = formatDateKey(day);
             const log = profile.logs[key] || {};
             const isToday = key === todayKey;
-            const isSelected = key === selectedDateKey;
+            const isSelected = !selectionMode && key === selectedDateKey;
+            const isMultiSelected = selectionMode && selectedDays.includes(key);
             const hasFlow = (log.flow || []).some((f) => PERIOD_FLOWS.includes(f));
             const hasSpotting = (log.flow || []).includes('Escape (Spotting)');
             const hasSymptoms =
@@ -1092,23 +1246,28 @@ function CalendarTab({ profile, analytics, currentMonth, setCurrentMonth, onDayC
             const isPredicted = predicted.has(key);
             const isFertile = fertile.days.has(key);
             const isOvulation = fertile.ovulation === key;
+            const isPregnant = !!log.pregnant;
 
             return (
               <button
                 key={key}
-                onClick={() => onDayClick(key)}
+                onClick={() => (selectionMode ? onToggleDay(key) : onDayClick(key))}
                 className={`relative aspect-square rounded-xl flex flex-col items-center justify-center border transition ${
-                  isSelected
-                    ? 'border-rose-500 bg-rose-50'
-                    : isToday
-                      ? 'border-rose-300 bg-white'
-                      : isOvulation
-                        ? 'border-emerald-500 bg-emerald-50'
-                        : isFertile
-                          ? 'border-emerald-200 bg-emerald-50/70'
-                          : isPredicted
-                            ? 'border-rose-100 bg-rose-50/60'
-                            : 'border-transparent bg-white active:bg-stone-50'
+                  isMultiSelected
+                    ? 'border-rose-500 bg-rose-100 ring-2 ring-rose-300'
+                    : isSelected
+                      ? 'border-rose-500 bg-rose-50'
+                      : isToday
+                        ? 'border-rose-300 bg-white'
+                        : isOvulation
+                          ? 'border-emerald-500 bg-emerald-50'
+                          : isFertile
+                            ? 'border-emerald-200 bg-emerald-50/70'
+                            : isPregnant
+                              ? 'border-pink-300 bg-pink-50'
+                              : isPredicted
+                                ? 'border-rose-100 bg-rose-50/60'
+                                : 'border-transparent bg-white active:bg-stone-50'
                 }`}
               >
                 <span
@@ -1124,8 +1283,13 @@ function CalendarTab({ profile, analytics, currentMonth, setCurrentMonth, onDayC
                     <span className="w-1.5 h-1.5 rounded-full bg-rose-300" />
                   )}
                   {hasSymptoms && <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />}
-                  {isOvulation && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />}
+                  {isPregnant && <span className="w-1.5 h-1.5 rounded-full bg-pink-500" />}
                 </span>
+                {isMultiSelected && (
+                  <span className="absolute top-1 right-1 w-4 h-4 rounded-full bg-rose-600 text-white flex items-center justify-center">
+                    <Check className="w-3 h-3" />
+                  </span>
+                )}
               </button>
             );
           })}
@@ -1155,6 +1319,23 @@ function CalendarTab({ profile, analytics, currentMonth, setCurrentMonth, onDayC
           </p>
         )}
       </SectionCard>
+
+      {selectionMode && selectedDays.length > 0 && (
+        <div className="sticky bottom-20 z-10 flex gap-2">
+          <button
+            onClick={() => setSelectedDays([])}
+            className="flex-1 bg-white border border-stone-200 text-stone-700 text-xs font-semibold py-3 rounded-xl shadow"
+          >
+            Limpar ({selectedDays.length})
+          </button>
+          <button
+            onClick={onOpenBatch}
+            className="flex-[2] bg-rose-600 text-white text-xs font-semibold py-3 rounded-xl shadow active:bg-rose-700"
+          >
+            Registrar em {selectedDays.length} {selectedDays.length === 1 ? 'dia' : 'dias'}
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-3">
         <SectionCard className="p-3!">
@@ -1848,6 +2029,19 @@ function LogSheet({ profile, dateKey, onChangeDate, onClose, toggleOption, updat
           </Field>
 
           <button
+            type="button"
+            onClick={() => updateDayField('pregnant', !log.pregnant)}
+            className={`w-full text-xs font-semibold py-2.5 rounded-xl border flex items-center justify-center gap-2 transition ${
+              log.pregnant
+                ? 'bg-pink-600 text-white border-pink-600'
+                : 'bg-white text-stone-700 border-stone-200 active:bg-stone-50'
+            }`}
+          >
+            <Baby className="w-4 h-4" />
+            {log.pregnant ? 'Dia marcado como gravidez' : 'Marcar dia como gravidez'}
+          </button>
+
+          <button
             onClick={clearDay}
             className="w-full text-xs font-medium py-2.5 rounded-xl border border-stone-200 text-stone-600 flex items-center justify-center gap-2 active:bg-stone-100"
           >
@@ -1865,6 +2059,112 @@ function LogSheet({ profile, dateKey, onChangeDate, onClose, toggleOption, updat
             className="w-full bg-rose-600 active:bg-rose-700 text-white font-semibold text-sm py-3 rounded-xl"
           >
             Concluir
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Modal: registro em vários dias                                      */
+/* ------------------------------------------------------------------ */
+
+function BatchLogSheet({ profile, days, onClose, onApply }) {
+  const [patch, setPatch] = useState({});
+  const hasHysterectomy = (profile.conditions || []).includes('hysterectomy');
+  const categories = DAILY_CATEGORIES.filter((c) => !(hasHysterectomy && c.key === 'flow'));
+  const ordered = [...days].sort();
+  const selectedCount = Object.values(patch).reduce((acc, list) => acc + list.length, 0);
+
+  const toggle = (categoryKey, option) => {
+    setPatch((prev) => {
+      const current = prev[categoryKey] || [];
+      const next = current.includes(option)
+        ? current.filter((item) => item !== option)
+        : [...current, option];
+      const copy = { ...prev };
+      if (next.length > 0) copy[categoryKey] = next;
+      else delete copy[categoryKey];
+      return copy;
+    });
+  };
+
+  const rangeLabel =
+    ordered.length === 1
+      ? formatBR(ordered[0], { weekday: 'short', day: '2-digit', month: 'short' })
+      : `${formatBR(ordered[0], { day: '2-digit', month: '2-digit' })} a ${formatBR(
+          ordered[ordered.length - 1],
+          { day: '2-digit', month: '2-digit' }
+        )}`;
+
+  return (
+    <div className="fixed inset-0 z-50 bg-stone-900/40 flex items-end justify-center">
+      <div className="w-full max-w-lg bg-stone-50 rounded-t-3xl max-h-[92vh] flex flex-col sheet-anim">
+        <div className="sticky top-0 bg-stone-50 rounded-t-3xl border-b border-stone-200 px-4 py-3 flex items-center justify-between">
+          <div>
+            <p className="text-[10px] uppercase font-semibold text-stone-400">Registro em vários dias</p>
+            <h2 className="text-base font-bold text-stone-900">
+              {ordered.length} {ordered.length === 1 ? 'dia selecionado' : 'dias selecionados'}
+            </h2>
+            <p className="text-[11px] text-stone-500 mt-0.5">{rangeLabel}</p>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-lg bg-stone-200 text-stone-700">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="overflow-y-auto px-4 py-4 space-y-5 pb-8">
+          <div className="flex gap-2 p-3 rounded-xl bg-amber-50 border border-amber-200 text-[11px] text-amber-900">
+            <Info className="w-4 h-4 shrink-0 mt-0.5" />
+            <p className="leading-relaxed">
+              Marque o que aconteceu nesses dias. O que já estiver registrado é mantido e somado — nada
+              é apagado.
+            </p>
+          </div>
+
+          {categories.map((cat) => {
+            const Icon = cat.icon;
+            const selected = patch[cat.key] || [];
+            return (
+              <div key={cat.key}>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className={`w-7 h-7 rounded-lg flex items-center justify-center ${cat.color}`}>
+                    <Icon className="w-4 h-4" />
+                  </span>
+                  <h3 className="text-xs font-bold text-stone-800 uppercase tracking-wide">
+                    {cat.title}
+                  </h3>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {cat.options.map((opt) => (
+                    <Chip
+                      key={opt}
+                      active={selected.includes(opt)}
+                      onClick={() => toggle(cat.key, opt)}
+                    >
+                      {opt}
+                    </Chip>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+
+          <p className="text-[10px] text-stone-400 text-center leading-relaxed">
+            Dor, temperatura, peso e anotações continuam sendo registrados dia a dia.
+          </p>
+        </div>
+
+        <div className="border-t border-stone-200 px-4 py-3 bg-white pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+          <button
+            onClick={() => onApply(patch)}
+            disabled={selectedCount === 0}
+            className="w-full bg-rose-600 active:bg-rose-700 disabled:bg-stone-200 disabled:text-stone-400 text-white font-semibold text-sm py-3 rounded-xl"
+          >
+            {selectedCount === 0
+              ? 'Escolha ao menos uma opção'
+              : `Aplicar a ${ordered.length} ${ordered.length === 1 ? 'dia' : 'dias'}`}
           </button>
         </div>
       </div>
@@ -1953,6 +2253,9 @@ export default function App() {
   const [selectedDateKey, setSelectedDateKey] = useState(formatDateKey(new Date()));
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [logOpen, setLogOpen] = useState(false);
+  const [batchOpen, setBatchOpen] = useState(false);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedDays, setSelectedDays] = useState([]);
   const [selectedArticle, setSelectedArticle] = useState(null);
   const [guideFilter, setGuideFilter] = useState('all');
   const [copied, setCopied] = useState(false);
@@ -2092,6 +2395,7 @@ export default function App() {
 
   const analytics = useMemo(() => computeCycleAnalytics(profile), [profile]);
   const status = useMemo(() => computeTodayStatus(profile, analytics), [profile, analytics]);
+  const forecast = useMemo(() => computeCycleForecast(profile, analytics), [profile, analytics]);
 
   const recommendedArticle = useMemo(() => {
     const match = ARTICLES.find(
@@ -2256,6 +2560,28 @@ export default function App() {
     });
   };
 
+  const handleBatchApply = (patch) => {
+    setProfiles((prev) => {
+      const id = prev[activeId] ? activeId : Object.keys(prev)[0];
+      if (!id) return prev;
+      const current = prev[id];
+      const nextLogs = { ...current.logs };
+      selectedDays.forEach((day) => {
+        const existing = nextLogs[day] || {};
+        const merged = { ...existing };
+        Object.entries(patch).forEach(([key, options]) => {
+          const currentList = Array.isArray(existing[key]) ? existing[key] : [];
+          merged[key] = [...new Set([...currentList, ...options])];
+        });
+        nextLogs[day] = merged;
+      });
+      return { ...prev, [id]: { ...current, logs: nextLogs } };
+    });
+    setBatchOpen(false);
+    setSelectionMode(false);
+    setSelectedDays([]);
+    setNotice(`Registro aplicado a ${selectedDays.length} ${selectedDays.length === 1 ? 'dia' : 'dias'}.`);
+  };
   const resetData = () => {
     updateProfile({ logs: {}, contractions: [], lastPeriodStart: null });
   };
@@ -2388,6 +2714,7 @@ export default function App() {
             profile={profile}
             analytics={analytics}
             status={status}
+            forecast={forecast}
             todayLog={todayLog}
             recommendedArticle={recommendedArticle}
             latestWeight={weightHistory[0] || null}
@@ -2417,6 +2744,18 @@ export default function App() {
               setSelectedDateKey(key);
               setLogOpen(true);
             }}
+            selectionMode={selectionMode}
+            selectedDays={selectedDays}
+            onToggleSelectionMode={() => {
+              setSelectionMode((v) => !v);
+              if (selectionMode) setSelectedDays([]);
+            }}
+            onToggleDay={(key) =>
+              setSelectedDays((prev) =>
+                prev.includes(key) ? prev.filter((d) => d !== key) : [...prev, key]
+              )
+            }
+            onOpenBatch={() => setBatchOpen(true)}
           />
         )}
 
@@ -2477,15 +2816,12 @@ export default function App() {
         </div>
       </nav>
 
-      {logOpen && (
-        <LogSheet
+      {batchOpen && selectedDays.length > 0 && (
+        <BatchLogSheet
           profile={profile}
-          dateKey={selectedDateKey}
-          onChangeDate={setSelectedDateKey}
-          onClose={() => setLogOpen(false)}
-          toggleOption={toggleOption}
-          updateDayField={updateDayField}
-          clearDay={clearDay}
+          days={selectedDays}
+          onClose={() => setBatchOpen(false)}
+          onApply={handleBatchApply}
         />
       )}
 

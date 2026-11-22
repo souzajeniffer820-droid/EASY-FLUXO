@@ -19,6 +19,8 @@ Stack: **React 18 + Vite 6 + Tailwind CSS 4 + Capacitor 7 (Android)**.
   ciclos.
 - **Algoritmo adaptativo**: calcula média real do ciclo, duração da menstruação e variação a partir
   dos episódios de sangramento registrados.
+- **Previsão na tela inicial**: mostra a próxima menstruação e a ovulação estimada (com janela fértil
+  e nível de confiança) assim que o app abre.
 - **Contador de contrações** com regra 5-1-1 para a gestação.
 - **IMC automático** a partir do peso registrado e da altura do perfil.
 - **Biblioteca educativa** (9 conteúdos com resumo, alerta médico e fonte) e recomendação por perfil.
@@ -68,4 +70,4 @@ tools/             # scripts auxiliares (geração de ícones/splash)
 ## Privacidade
 
 Nenhum dado sai do dispositivo: não há backend, conta ou telemetria. Os registros ficam no
-armazenamento local do app.
+armazenamento local do app.....

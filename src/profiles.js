@@ -97,6 +97,8 @@ export function normalizeLogEntry(raw) {
   const notes = cleanString(raw.notes, 5000);
   if (notes) entry.notes = notes;
 
+  if (raw.pregnant === true) entry.pregnant = true;
+
   return entry;
 }
 
