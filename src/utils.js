@@ -58,4 +58,20 @@ export function secondsToClock(total) {
   return `${String(m).padStart(2, '0')}:${String(rest).padStart(2, '0')}`;
 }
 
+/**
+ * Retorna o próximo início de ciclo previsto que ainda não passou.
+ * Sem isso, quem fica semanas sem registrar vê a previsão "congelada" no passado.
+ */
+export function nextCycleStart(lastPeriodStartKey, avgCycleLength, today = new Date()) {
+  if (!lastPeriodStartKey) return null;
+  const length = Math.max(15, Math.min(120, Number(avgCycleLength) || 28));
+  let next = addDays(parseDateKey(lastPeriodStartKey), length);
+  let guard = 0;
+  while (diffDays(next, today) > 0 && guard < 120) {
+    next = addDays(next, length);
+    guard += 1;
+  }
+  return next;
+}
+
 export const FLOW_VALUES = ['Escape (Spotting)', 'Leve', 'Moderado', 'Intenso', 'Coágulos'];

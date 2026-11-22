@@ -1,11 +1,9 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
 import {
   Calendar as CalendarIcon,
   Heart,
-  Baby,
   Sparkles,
-  Activity,
   FileText,
   BookOpen,
   User,
@@ -19,21 +17,26 @@ import {
   Square,
   RotateCcw,
   Scale,
-  Droplets,
   AlertCircle,
   Info,
   Copy,
   CheckCircle2,
   ShieldCheck,
-  Users,
+  ShieldAlert,
   Stethoscope,
   HelpCircle,
   Smartphone,
   Search,
   Trash2,
-  Pencil,
   Share2,
   Sun,
+  Download,
+  Upload,
+  Lock,
+  KeyRound,
+  TrendingUp,
+  ArrowUpRight,
+  ArrowDownRight,
 } from 'lucide-react';
 
 import {
@@ -56,34 +59,26 @@ import {
   formatBR,
   monthTitle,
   secondsToClock,
+  nextCycleStart,
 } from './utils';
+
+import { createProfile, mergeProfiles, normalizeProfiles } from './profiles';
+import { readLockConfig, LOCK_TIMEOUT_MS, PIN_LENGTH } from './lock';
+import { copyText } from './clipboard';
+import LockScreen from './LockScreen';
+import PinSheet from './PinSheet';
+import WelcomeSheet from './WelcomeSheet';
+import { ExportSheet, ImportSheet } from './BackupSheets';
+import { Sparkline } from './charts';
 
 const STORAGE_KEY = 'ciclolivre_v3_profiles';
 const ACTIVE_KEY = 'ciclolivre_v3_active';
+const CORRUPT_KEY = 'ciclolivre_v3_corrupted_backup';
 const PERIOD_FLOWS = ['Leve', 'Moderado', 'Intenso', 'Coágulos'];
 
 /* ------------------------------------------------------------------ */
 /* Dados iniciais                                                      */
 /* ------------------------------------------------------------------ */
-
-function createProfile(id, name = 'Meu perfil') {
-  return {
-    id,
-    name,
-    heightCm: '',
-    lifeMode: 'cycle',
-    contraceptive: 'none',
-    vasectomyConfirmed: false,
-    conditions: [],
-    defaultCycleLength: 28,
-    defaultPeriodLength: 5,
-    postpartumDate: formatDateKey(addDays(new Date(), -30)),
-    breastfeeding: 'exclusive',
-    pregnancyLMP: formatDateKey(addDays(new Date(), -90)),
-    logs: {},
-    contractions: [],
-  };
-}
 
 function buildDemoData() {
   const today = new Date();
@@ -120,14 +115,39 @@ function buildDemoData() {
 function loadProfiles() {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (parsed && Object.keys(parsed).length) return parsed;
+    if (!saved) return { profiles: { p1: createProfile('p1') }, error: null };
+
+    let parsed;
+    try {
+      parsed = JSON.parse(saved);
+    } catch {
+      try {
+        localStorage.setItem(CORRUPT_KEY, saved);
+      } catch {
+        /* sem espaço para preservar a cópia */
+      }
+      return {
+        profiles: { p1: createProfile('p1') },
+        error:
+          'Não foi possível ler os dados salvos. Uma cópia do conteúdo corrompido foi preservada no dispositivo.',
+      };
     }
-  } catch (e) {
-    console.error(e);
+
+    const profiles = normalizeProfiles(parsed);
+    if (!profiles) {
+      return {
+        profiles: { p1: createProfile('p1') },
+        error: 'Os dados salvos estavam em um formato não reconhecido.',
+      };
+    }
+
+    return { profiles, error: null };
+  } catch {
+    return {
+      profiles: { p1: createProfile('p1') },
+      error: 'Não foi possível acessar o armazenamento local do dispositivo.',
+    };
   }
-  return { p1: createProfile('p1') };
 }
 
 /* ------------------------------------------------------------------ */
@@ -146,7 +166,7 @@ function computeCycleAnalytics(profile) {
       avgCycleLength: profile.defaultCycleLength || 28,
       avgPeriodLength: profile.defaultPeriodLength || 5,
       variation: 0,
-      lastPeriodStart: null,
+      lastPeriodStart: profile.lastPeriodStart || null,
       hasRealData: false,
     };
   }
@@ -291,10 +311,19 @@ function computeTodayStatus(profile, analytics) {
     };
   }
 
+  if (!analytics.lastPeriodStart) {
+    return {
+      badge: 'Primeiros passos',
+      badgeColor: 'bg-stone-100 text-stone-700',
+      headline: 'Registre seu primeiro fluxo',
+      subtext:
+        'Quando você marcar um dia de menstruação, o app calcula seu dia do ciclo e as previsões com base no seu histórico real.',
+      phase: 'empty',
+    };
+  }
+
   if (profile.lifeMode === 'perimenopause') {
-    const lastStart = analytics.lastPeriodStart
-      ? parseDateKey(analytics.lastPeriodStart)
-      : addDays(today, -18);
+    const lastStart = parseDateKey(analytics.lastPeriodStart);
     const cycleDay = Math.max(1, diffDays(lastStart, today) + 1);
     return {
       badge: 'Perimenopausa',
@@ -305,9 +334,7 @@ function computeTodayStatus(profile, analytics) {
     };
   }
 
-  const lastStart = analytics.lastPeriodStart
-    ? parseDateKey(analytics.lastPeriodStart)
-    : addDays(today, -10);
+  const lastStart = parseDateKey(analytics.lastPeriodStart);
   const cycleDay = Math.max(1, diffDays(lastStart, today) + 1);
   const avgLen = analytics.avgCycleLength;
   const ovulDay = Math.max(10, avgLen - 14);
@@ -463,6 +490,159 @@ function Field({ label, children }) {
 const inputClass =
   'w-full text-sm border border-stone-200 rounded-xl px-3 py-2.5 bg-white text-stone-800 focus:outline-none focus:ring-2 focus:ring-rose-400';
 
+const TREND_METRICS = [
+  {
+    id: 'weight',
+    label: 'Peso',
+    color: '#0f766e',
+    unit: ' kg',
+    format: (value) => Number(value).toFixed(1),
+    empty: 'Registre seu peso no diário para acompanhar a evolução.',
+  },
+  {
+    id: 'bbt',
+    label: 'Temp. basal',
+    color: '#c2410c',
+    unit: '°C',
+    format: (value) => Number(value).toFixed(1),
+    empty: 'Registre a temperatura basal para enxergar o padrão do seu ciclo.',
+  },
+  {
+    id: 'pain',
+    label: 'Dor',
+    color: '#be123c',
+    unit: '/10',
+    format: (value) => String(Math.round(Number(value))),
+    empty: 'Use a escala de dor no diário para acompanhar os picos.',
+  },
+  {
+    id: 'cycle',
+    label: 'Ciclos',
+    color: '#7c3aed',
+    unit: ' d',
+    format: (value) => String(Math.round(Number(value))),
+    empty: 'Registre pelo menos dois fluxos para ver a duração dos ciclos.',
+  },
+];
+
+function TrendsCard({ profile, analytics }) {
+  const [metric, setMetric] = useState('weight');
+
+  const data = useMemo(() => {
+    const weight = [];
+    const bbt = [];
+    const pain = [];
+
+    Object.entries(profile.logs || {})
+      .sort(([dateA], [dateB]) => dateA.localeCompare(dateB))
+      .forEach(([date, log]) => {
+        const weightValue = parseFloat(log.weight);
+        if (Number.isFinite(weightValue) && weightValue > 0) {
+          weight.push({ key: `w-${date}`, date, value: weightValue });
+        }
+
+        const bbtValue = parseFloat(log.bbt);
+        if (Number.isFinite(bbtValue) && bbtValue > 0) {
+          bbt.push({ key: `t-${date}`, date, value: bbtValue });
+        }
+
+        if (log.painScale !== undefined && log.painScale !== null && log.painScale !== '') {
+          const painValue = Number(log.painScale);
+          if (Number.isFinite(painValue)) pain.push({ key: `p-${date}`, date, value: painValue });
+        }
+      });
+
+    const cycle = analytics.cycles
+      .filter((item) => item.cycleLength)
+      .map((item) => ({ key: `c-${item.start}`, date: item.start, value: item.cycleLength }));
+
+    return {
+      weight: weight.slice(-30),
+      bbt: bbt.slice(-30),
+      pain: pain.slice(-30),
+      cycle: cycle.slice(-12),
+    };
+  }, [profile.logs, analytics.cycles]);
+
+  const points = data[metric] || [];
+  const config = TREND_METRICS.find((item) => item.id === metric) || TREND_METRICS[0];
+  const latest = points[points.length - 1];
+  const previous = points[points.length - 2];
+  const delta = latest && previous ? latest.value - previous.value : null;
+
+  return (
+    <SectionCard>
+      <div className="flex items-center gap-2 mb-2">
+        <TrendingUp className="w-4 h-4 text-rose-600" />
+        <h3 className="text-sm font-bold text-stone-900">Tendências</h3>
+      </div>
+
+      <div className="flex gap-1.5 overflow-x-auto no-scrollbar pb-2">
+        {TREND_METRICS.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => setMetric(item.id)}
+            aria-pressed={metric === item.id}
+            className={`shrink-0 text-[11px] px-2.5 py-1 rounded-full border font-medium transition ${
+              metric === item.id
+                ? 'bg-stone-900 text-white border-stone-900'
+                : 'bg-white text-stone-600 border-stone-200'
+            }`}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+
+      {points.length === 0 ? (
+        <p className="text-xs text-stone-500 leading-relaxed py-2">{config.empty}</p>
+      ) : (
+        <>
+          <div className="flex items-end justify-between mb-1">
+            <div>
+              <p className="text-2xl font-bold text-stone-900">
+                {config.format(latest.value)}
+                {config.unit}
+              </p>
+              <p className="text-[10px] text-stone-500">último registro</p>
+            </div>
+            {delta !== null && (
+              <span
+                className={`flex items-center gap-0.5 text-[11px] font-semibold ${
+                  delta > 0
+                    ? 'text-rose-600'
+                    : delta < 0
+                      ? 'text-emerald-600'
+                      : 'text-stone-400'
+                }`}
+              >
+                {delta > 0 && <ArrowUpRight className="w-3.5 h-3.5" />}
+                {delta < 0 && <ArrowDownRight className="w-3.5 h-3.5" />}
+                {config.format(Math.abs(delta))}
+                {config.unit}
+              </span>
+            )}
+          </div>
+          <Sparkline
+            points={points}
+            color={config.color}
+            unit={config.unit}
+            formatValue={config.format}
+            ariaLabel={`Evolução de ${config.label}`}
+          />
+        </>
+      )}
+
+      {metric === 'bbt' && points.length > 0 && (
+        <p className="text-[10px] text-stone-400 mt-2 leading-relaxed">
+          A temperatura basal só é útil quando medida no mesmo horário, antes de levantar.
+        </p>
+      )}
+    </SectionCard>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /* Aba: Hoje                                                           */
 /* ------------------------------------------------------------------ */
@@ -473,6 +653,7 @@ function TodayTab({
   status,
   todayLog,
   recommendedArticle,
+  latestWeight,
   onOpenLogToday,
   onOpenArticle,
   onGoCalendar,
@@ -704,6 +885,56 @@ function TodayTab({
       </SectionCard>
 
       <SectionCard>
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <Scale className="w-4 h-4 text-teal-600" />
+            <h3 className="text-sm font-bold text-stone-900">Peso & IMC</h3>
+          </div>
+          <span className="text-[11px] text-stone-500">
+            {latestWeight
+              ? formatBR(latestWeight.date, { day: '2-digit', month: 'short' })
+              : 'sem registro'}
+          </span>
+        </div>
+
+        {latestWeight ? (
+          <div className="grid grid-cols-2 gap-2">
+            <div className="rounded-xl bg-stone-50 border border-stone-100 p-3">
+              <p className="text-2xl font-bold text-stone-900">
+                {latestWeight.weight}
+                <span className="text-sm font-medium text-stone-500"> kg</span>
+              </p>
+              <p className="text-[10px] text-stone-500 mt-0.5">último peso</p>
+            </div>
+            <div
+              className={`rounded-xl border p-3 ${
+                latestWeight.bmi ? latestWeight.bmi.color : 'bg-stone-50 border-stone-100'
+              }`}
+            >
+              <p className="text-2xl font-bold">
+                {latestWeight.bmi ? latestWeight.bmi.value : '—'}
+              </p>
+              <p className="text-[10px] mt-0.5">
+                {latestWeight.bmi ? latestWeight.bmi.label : 'Informe sua altura no Perfil'}
+              </p>
+            </div>
+          </div>
+        ) : (
+          <p className="text-xs text-stone-500 leading-relaxed">
+            Registre seu peso no diário para calcular o IMC automaticamente.
+          </p>
+        )}
+
+        <button
+          type="button"
+          onClick={onOpenLogToday}
+          className="mt-2 w-full text-xs font-semibold py-2.5 rounded-xl border border-stone-200 text-stone-700 flex items-center justify-center gap-2 active:bg-stone-50"
+        >
+          <Plus className="w-3.5 h-3.5" /> Registrar peso
+        </button>
+      </SectionCard>
+
+      <SectionCard>
         <div className="flex items-center gap-2 mb-2">
           <BookOpen className="w-4 h-4 text-rose-600" />
           <h3 className="text-sm font-bold text-stone-900">Recomendado para você</h3>
@@ -750,14 +981,59 @@ function CalendarTab({ profile, analytics, currentMonth, setCurrentMonth, onDayC
   const predicted = useMemo(() => {
     const set = new Set();
     if (!analytics.lastPeriodStart) return set;
-    if (profile.lifeMode === 'pregnant' || profile.lifeMode === 'postpartum') return set;
+    if (
+      profile.lifeMode === 'pregnant' ||
+      profile.lifeMode === 'postpartum' ||
+      profile.lifeMode === 'perimenopause'
+    ) {
+      return set;
+    }
     if (profile.contraceptive === 'continuous') return set;
-    const nextStart = addDays(parseDateKey(analytics.lastPeriodStart), analytics.avgCycleLength);
+    if ((profile.conditions || []).includes('hysterectomy')) return set;
+
+    const nextStart = nextCycleStart(analytics.lastPeriodStart, analytics.avgCycleLength);
+    if (!nextStart) return set;
+
     for (let i = 0; i < analytics.avgPeriodLength; i += 1) {
       set.add(formatDateKey(addDays(nextStart, i)));
     }
     return set;
-  }, [analytics, profile.lifeMode, profile.contraceptive]);
+  }, [
+    analytics,
+    profile.lifeMode,
+    profile.contraceptive,
+    profile.conditions,
+  ]);
+
+  const fertile = useMemo(() => {
+    const empty = { days: new Set(), ovulation: null, enabled: false };
+    if (!analytics.lastPeriodStart) return empty;
+    if (
+      profile.lifeMode === 'pregnant' ||
+      profile.lifeMode === 'postpartum' ||
+      profile.lifeMode === 'perimenopause'
+    ) {
+      return empty;
+    }
+    if (profile.contraceptive === 'continuous') return empty;
+    if ((profile.conditions || []).includes('hysterectomy')) return empty;
+
+    const nextStart = nextCycleStart(analytics.lastPeriodStart, analytics.avgCycleLength);
+    if (!nextStart) return empty;
+
+    const ovulation = addDays(nextStart, -14);
+    const days = new Set();
+    for (let offset = -5; offset <= 1; offset += 1) {
+      days.add(formatDateKey(addDays(ovulation, offset)));
+    }
+
+    return { days, ovulation: formatDateKey(ovulation), enabled: true };
+  }, [
+    analytics,
+    profile.lifeMode,
+    profile.contraceptive,
+    profile.conditions,
+  ]);
 
   const todayKey = formatDateKey(new Date());
   const monthStats = useMemo(() => {
@@ -814,6 +1090,8 @@ function CalendarTab({ profile, analytics, currentMonth, setCurrentMonth, onDayC
               !!log.painScale ||
               !!log.weight;
             const isPredicted = predicted.has(key);
+            const isFertile = fertile.days.has(key);
+            const isOvulation = fertile.ovulation === key;
 
             return (
               <button
@@ -824,9 +1102,13 @@ function CalendarTab({ profile, analytics, currentMonth, setCurrentMonth, onDayC
                     ? 'border-rose-500 bg-rose-50'
                     : isToday
                       ? 'border-rose-300 bg-white'
-                      : isPredicted
-                        ? 'border-rose-100 bg-rose-50/60'
-                        : 'border-transparent bg-white active:bg-stone-50'
+                      : isOvulation
+                        ? 'border-emerald-500 bg-emerald-50'
+                        : isFertile
+                          ? 'border-emerald-200 bg-emerald-50/70'
+                          : isPredicted
+                            ? 'border-rose-100 bg-rose-50/60'
+                            : 'border-transparent bg-white active:bg-stone-50'
                 }`}
               >
                 <span
@@ -842,13 +1124,14 @@ function CalendarTab({ profile, analytics, currentMonth, setCurrentMonth, onDayC
                     <span className="w-1.5 h-1.5 rounded-full bg-rose-300" />
                   )}
                   {hasSymptoms && <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />}
+                  {isOvulation && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />}
                 </span>
               </button>
             );
           })}
         </div>
 
-        <div className="flex items-center justify-center gap-4 mt-4 pt-3 border-t border-stone-100 text-[10px] text-stone-500">
+        <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5 mt-4 pt-3 border-t border-stone-100 text-[10px] text-stone-500">
           <span className="flex items-center gap-1">
             <span className="w-2 h-2 rounded-full bg-rose-500" /> Fluxo
           </span>
@@ -858,19 +1141,33 @@ function CalendarTab({ profile, analytics, currentMonth, setCurrentMonth, onDayC
           <span className="flex items-center gap-1">
             <span className="w-2 h-2 rounded-full bg-rose-100 border border-rose-200" /> Previsão
           </span>
+          {fertile.enabled && (
+            <span className="flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full bg-emerald-400" /> Período fértil
+            </span>
+          )}
         </div>
+
+        {fertile.enabled && (
+          <p className="text-[10px] text-stone-400 text-center mt-2 leading-relaxed">
+            Período fértil e ovulação estimados pela média do ciclo. Não use como método
+            contraceptivo.
+          </p>
+        )}
       </SectionCard>
 
       <div className="grid grid-cols-2 gap-3">
-        <SectionCard className="!p-3">
+        <SectionCard className="p-3!">
           <p className="text-[10px] uppercase font-semibold text-stone-400">Dias de fluxo</p>
           <p className="text-2xl font-bold text-rose-600">{monthStats.flow}</p>
         </SectionCard>
-        <SectionCard className="!p-3">
+        <SectionCard className="p-3!">
           <p className="text-[10px] uppercase font-semibold text-stone-400">Dias registrados</p>
           <p className="text-2xl font-bold text-stone-800">{monthStats.registered}</p>
         </SectionCard>
       </div>
+
+      <TrendsCard profile={profile} analytics={analytics} />
 
       <SectionCard>
         <h3 className="text-sm font-bold text-stone-900 mb-2">Histórico de ciclos</h3>
@@ -1023,7 +1320,7 @@ function ReportTab({ reportText, copied, onCopy, onShare }) {
         </div>
       </SectionCard>
 
-      <SectionCard className="!p-0 overflow-hidden">
+      <SectionCard className="p-0! overflow-hidden">
         <pre className="text-[11px] leading-relaxed text-stone-700 whitespace-pre-wrap p-4 max-h-[60vh] overflow-y-auto font-mono">
           {reportText}
         </pre>
@@ -1036,7 +1333,20 @@ function ReportTab({ reportText, copied, onCopy, onShare }) {
 /* Aba: Perfil                                                         */
 /* ------------------------------------------------------------------ */
 
-function ProfileTab({ profiles, activeProfileId, setActiveProfileId, updateProfile, onAddProfile, onDeleteProfile, onAddDemo, onReset }) {
+function ProfileTab({
+  profiles,
+  activeProfileId,
+  setActiveProfileId,
+  updateProfile,
+  onAddProfile,
+  onDeleteProfile,
+  onAddDemo,
+  onReset,
+  onExport,
+  onImport,
+  lockEnabled,
+  onOpenPin,
+}) {
   const profile = profiles[activeProfileId];
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
@@ -1255,7 +1565,12 @@ function ProfileTab({ profiles, activeProfileId, setActiveProfileId, updateProfi
               inputMode="numeric"
               value={profile.defaultCycleLength}
               onChange={(e) =>
-                updateProfile({ defaultCycleLength: parseInt(e.target.value || '28', 10) })
+                updateProfile({
+                  defaultCycleLength: Math.min(
+                    120,
+                    Math.max(15, parseInt(e.target.value || '28', 10) || 28)
+                  ),
+                })
               }
               className={inputClass}
             />
@@ -1266,7 +1581,12 @@ function ProfileTab({ profiles, activeProfileId, setActiveProfileId, updateProfi
               inputMode="numeric"
               value={profile.defaultPeriodLength}
               onChange={(e) =>
-                updateProfile({ defaultPeriodLength: parseInt(e.target.value || '5', 10) })
+                updateProfile({
+                  defaultPeriodLength: Math.min(
+                    20,
+                    Math.max(1, parseInt(e.target.value || '5', 10) || 5)
+                  ),
+                })
               }
               className={inputClass}
             />
@@ -1278,8 +1598,41 @@ function ProfileTab({ profiles, activeProfileId, setActiveProfileId, updateProfi
       </SectionCard>
 
       <SectionCard>
+        <div className="flex items-center gap-2 mb-1">
+          <Lock className="w-4 h-4 text-stone-700" />
+          <h3 className="text-sm font-bold text-stone-900">Segurança</h3>
+        </div>
+        <p className="text-[11px] text-stone-500 mb-3 leading-relaxed">
+          Bloqueie o app com um PIN de {PIN_LENGTH} dígitos. O PIN fica apenas neste dispositivo e
+          não é enviado para nenhum servidor.
+        </p>
+        <button
+          onClick={onOpenPin}
+          className="w-full text-xs font-semibold py-2.5 rounded-xl border border-stone-200 text-stone-700 flex items-center justify-center gap-2 active:bg-stone-50"
+        >
+          <KeyRound className="w-4 h-4" />
+          {lockEnabled ? 'Alterar ou desativar PIN' : 'Ativar bloqueio por PIN'}
+        </button>
+      </SectionCard>
+
+      <SectionCard>
         <h3 className="text-sm font-bold text-stone-900 mb-2">Dados</h3>
         <div className="space-y-2">
+          <button
+            onClick={onExport}
+            className="w-full text-xs font-semibold py-2.5 rounded-xl bg-stone-900 text-white flex items-center justify-center gap-2 active:bg-stone-800"
+          >
+            <Download className="w-4 h-4" /> Exportar backup (.json)
+          </button>
+          <button
+            onClick={onImport}
+            className="w-full text-xs font-medium py-2.5 rounded-xl border border-stone-200 text-stone-700 flex items-center justify-center gap-2 active:bg-stone-50"
+          >
+            <Upload className="w-4 h-4" /> Importar backup
+          </button>
+          <p className="text-[10px] text-stone-400 leading-relaxed px-1">
+            Desinstalar o app apaga todos os registros. Faça backups regulares.
+          </p>
           <button
             onClick={onAddDemo}
             className="w-full text-xs font-medium py-2.5 rounded-xl border border-stone-200 text-stone-700 flex items-center justify-center gap-2 active:bg-stone-50"
@@ -1585,7 +1938,8 @@ const TABS = [
 ];
 
 export default function App() {
-  const [profiles, setProfiles] = useState(loadProfiles);
+  const [initial] = useState(loadProfiles);
+  const [profiles, setProfiles] = useState(initial.profiles);
   const [activeProfileId, setActiveProfileId] = useState(() => {
     try {
       const saved = localStorage.getItem(ACTIVE_KEY);
@@ -1604,28 +1958,83 @@ export default function App() {
   const [copied, setCopied] = useState(false);
   const [showInstallTip, setShowInstallTip] = useState(false);
 
+  const [storageError, setStorageError] = useState(initial.error);
+  const [saveError, setSaveError] = useState(null);
+  const [notice, setNotice] = useState(null);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+
+  const [lockConfig, setLockConfig] = useState(readLockConfig);
+  const [locked, setLocked] = useState(() => readLockConfig().enabled);
+  const [pinSheet, setPinSheet] = useState(null);
+  const [forgotOpen, setForgotOpen] = useState(false);
+  const lastActiveRef = useRef(Date.now());
+
   const [timerRunning, setTimerRunning] = useState(false);
   const [startTime, setStartTime] = useState(null);
   const [elapsed, setElapsed] = useState(0);
   const [intensity, setIntensity] = useState('Moderada');
 
-  const profile = profiles[activeProfileId] || Object.values(profiles)[0];
+  const activeId = profiles[activeProfileId] ? activeProfileId : Object.keys(profiles)[0];
+  const profile = profiles[activeId];
 
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(profiles));
-    } catch (e) {
-      console.error(e);
+      setSaveError(null);
+    } catch {
+      setSaveError(
+        'Não foi possível salvar seus dados. Libere espaço no dispositivo e exporte um backup.'
+      );
     }
   }, [profiles]);
 
   useEffect(() => {
     try {
-      localStorage.setItem(ACTIVE_KEY, activeProfileId);
-    } catch (e) {
-      console.error(e);
+      if (activeId) localStorage.setItem(ACTIVE_KEY, activeId);
+    } catch {
+      /* armazenamento indisponível */
     }
-  }, [activeProfileId]);
+  }, [activeId]);
+
+  useEffect(() => {
+    if (!notice) return undefined;
+    const timer = setTimeout(() => setNotice(null), 4000);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        lastActiveRef.current = Date.now();
+      } else if (lockConfig.enabled && Date.now() - lastActiveRef.current > LOCK_TIMEOUT_MS) {
+        setLocked(true);
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, [lockConfig.enabled]);
+
+  useEffect(() => {
+    let handle;
+    try {
+      CapacitorApp.addListener('appStateChange', ({ isActive }) => {
+        if (!isActive) {
+          lastActiveRef.current = Date.now();
+        } else if (lockConfig.enabled && Date.now() - lastActiveRef.current > LOCK_TIMEOUT_MS) {
+          setLocked(true);
+        }
+      }).then((listener) => {
+        handle = listener;
+      });
+    } catch {
+      /* ambiente web sem plugin nativo */
+    }
+    return () => {
+      if (handle) handle.remove();
+    };
+  }, [lockConfig.enabled]);
 
   useEffect(() => {
     let id;
@@ -1642,9 +2051,14 @@ export default function App() {
     let handle;
     try {
       CapacitorApp.addListener('backButton', () => {
+        if (locked) return;
+        if (pinSheet) return setPinSheet(null);
+        if (exportOpen) return setExportOpen(false);
+        if (importOpen) return setImportOpen(false);
         if (logOpen) return setLogOpen(false);
         if (selectedArticle) return setSelectedArticle(null);
         if (showInstallTip) return setShowInstallTip(false);
+        if (!profile.onboarded) return updateProfile({ onboarded: true });
         if (activeTab !== 'today') return setActiveTab('today');
         CapacitorApp.exitApp();
       }).then((h) => {
@@ -1656,13 +2070,24 @@ export default function App() {
     return () => {
       if (handle) handle.remove();
     };
-  }, [logOpen, selectedArticle, showInstallTip, activeTab]);
+  }, [
+    locked,
+    pinSheet,
+    exportOpen,
+    importOpen,
+    logOpen,
+    selectedArticle,
+    showInstallTip,
+    activeTab,
+    profile.onboarded,
+  ]);
 
   const updateProfile = (patch) => {
-    setProfiles((prev) => ({
-      ...prev,
-      [activeProfileId]: { ...prev[activeProfileId], ...patch },
-    }));
+    setProfiles((prev) => {
+      const id = prev[activeId] ? activeId : Object.keys(prev)[0];
+      if (!id) return prev;
+      return { ...prev, [id]: { ...prev[id], ...patch } };
+    });
   };
 
   const analytics = useMemo(() => computeCycleAnalytics(profile), [profile]);
@@ -1700,31 +2125,58 @@ export default function App() {
   const todayLog = profile.logs[todayKey] || {};
 
   const toggleOption = (categoryKey, option) => {
-    const existing = (profile.logs[selectedDateKey] || {})[categoryKey] || [];
-    const updated = existing.includes(option)
-      ? existing.filter((item) => item !== option)
-      : [...existing, option];
-    updateProfile({
-      logs: {
-        ...profile.logs,
-        [selectedDateKey]: { ...(profile.logs[selectedDateKey] || {}), [categoryKey]: updated },
-      },
+    setProfiles((prev) => {
+      const id = prev[activeId] ? activeId : Object.keys(prev)[0];
+      if (!id) return prev;
+      const current = prev[id];
+      const entry = current.logs[selectedDateKey] || {};
+      const existing = entry[categoryKey] || [];
+      const updated = existing.includes(option)
+        ? existing.filter((item) => item !== option)
+        : [...existing, option];
+
+      return {
+        ...prev,
+        [id]: {
+          ...current,
+          logs: {
+            ...current.logs,
+            [selectedDateKey]: { ...entry, [categoryKey]: updated },
+          },
+        },
+      };
     });
   };
 
   const updateDayField = (field, value) => {
-    updateProfile({
-      logs: {
-        ...profile.logs,
-        [selectedDateKey]: { ...(profile.logs[selectedDateKey] || {}), [field]: value },
-      },
+    setProfiles((prev) => {
+      const id = prev[activeId] ? activeId : Object.keys(prev)[0];
+      if (!id) return prev;
+      const current = prev[id];
+      const entry = current.logs[selectedDateKey] || {};
+
+      return {
+        ...prev,
+        [id]: {
+          ...current,
+          logs: {
+            ...current.logs,
+            [selectedDateKey]: { ...entry, [field]: value },
+          },
+        },
+      };
     });
   };
 
   const clearDay = () => {
-    const nextLogs = { ...profile.logs };
-    delete nextLogs[selectedDateKey];
-    updateProfile({ logs: nextLogs });
+    setProfiles((prev) => {
+      const id = prev[activeId] ? activeId : Object.keys(prev)[0];
+      if (!id) return prev;
+      const current = prev[id];
+      const nextLogs = { ...current.logs };
+      delete nextLogs[selectedDateKey];
+      return { ...prev, [id]: { ...current, logs: nextLogs } };
+    });
   };
 
   const handleTimerToggle = () => {
@@ -1757,13 +2209,13 @@ export default function App() {
   };
 
   const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(reportText);
-    } catch {
-      /* clipboard pode falhar em WebView sem permissão */
+    const ok = await copyText(reportText);
+    setCopied(ok);
+    if (ok) {
+      setTimeout(() => setCopied(false), 2200);
+    } else {
+      setNotice('Não foi possível copiar o relatório.');
     }
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2200);
   };
 
   const handleShare = async () => {
@@ -1785,13 +2237,15 @@ export default function App() {
   };
 
   const deleteProfile = (id) => {
+    const remaining = Object.keys(profiles).filter((key) => key !== id);
+    if (!remaining.length) return;
+
     setProfiles((prev) => {
       const next = { ...prev };
       delete next[id];
-      const remaining = Object.keys(next);
-      setActiveProfileId(remaining[0]);
       return next;
     });
+    setActiveProfileId(remaining[0]);
   };
 
   const addDemo = () => {
@@ -1803,8 +2257,64 @@ export default function App() {
   };
 
   const resetData = () => {
-    updateProfile({ logs: {}, contractions: [] });
+    updateProfile({ logs: {}, contractions: [], lastPeriodStart: null });
   };
+
+  const handleReplaceImport = (result) => {
+    setProfiles(result.profiles);
+    setActiveProfileId(result.activeProfileId);
+    setImportOpen(false);
+    setNotice(
+      `Backup restaurado: ${result.summary.profiles} perfil(is) e ${result.summary.logDays} dia(s) de registro.`
+    );
+  };
+
+  const handleMergeImport = (result) => {
+    setProfiles((prev) => mergeProfiles(prev, result.profiles));
+    setImportOpen(false);
+    setNotice('Backup mesclado com os dados atuais.');
+  };
+
+  const handlePinDone = (message) => {
+    setPinSheet(null);
+    setLockConfig(readLockConfig());
+    setLocked(false);
+    lastActiveRef.current = Date.now();
+    setNotice(message);
+  };
+
+  const handleUnlock = () => {
+    lastActiveRef.current = Date.now();
+    setLocked(false);
+  };
+
+  if (locked) {
+    return (
+      <>
+        <LockScreen onUnlock={handleUnlock} onForgot={() => setForgotOpen(true)} />
+        {forgotOpen && (
+          <div className="fixed inset-0 z-[90] bg-stone-900/50 flex items-center justify-center p-6 fade-in">
+            <div className="w-full max-w-sm bg-white rounded-2xl p-5 shadow-xl">
+              <h3 className="text-sm font-bold text-stone-900">Esqueceu o PIN?</h3>
+              <p className="text-xs text-stone-600 leading-relaxed mt-2">
+                Por segurança, o PIN não pode ser recuperado. Para voltar a usar o app, limpe os
+                dados do CicloLivre nas configurações do Android e importe um backup.
+              </p>
+              <p className="text-xs text-stone-600 leading-relaxed mt-2">
+                Se você não tiver um backup, os registros serão perdidos.
+              </p>
+              <button
+                onClick={() => setForgotOpen(false)}
+                className="mt-4 w-full bg-stone-900 text-white text-sm font-semibold py-2.5 rounded-xl"
+              >
+                Entendi
+              </button>
+            </div>
+          </div>
+        )}
+      </>
+    );
+  }
 
   return (
     <div className="min-h-full bg-stone-50 text-stone-900">
@@ -1823,7 +2333,7 @@ export default function App() {
           </div>
           <div className="flex items-center gap-1.5">
             <select
-              value={activeProfileId}
+              value={activeId}
               onChange={(e) => setActiveProfileId(e.target.value)}
               className="text-[11px] font-medium bg-stone-100 border border-stone-200 rounded-lg px-2 py-1.5 text-stone-700 max-w-[120px] focus:outline-none"
             >
@@ -1844,6 +2354,34 @@ export default function App() {
         </div>
       </header>
 
+      {(saveError || storageError) && (
+        <div className="max-w-lg mx-auto px-4 pt-3">
+          <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-[11px] text-rose-900">
+            <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="font-semibold">Seus dados podem não estar salvos</p>
+              <p className="mt-0.5 leading-relaxed">{saveError || storageError}</p>
+            </div>
+            <button
+              onClick={() => setExportOpen(true)}
+              className="shrink-0 font-semibold underline"
+            >
+              Exportar
+            </button>
+            <button
+              onClick={() => {
+                setSaveError(null);
+                setStorageError(null);
+              }}
+              aria-label="Fechar aviso"
+              className="shrink-0 text-rose-500"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       <main className="max-w-lg mx-auto px-4 pt-4 pb-24">
         {activeTab === 'today' && (
           <TodayTab
@@ -1852,6 +2390,7 @@ export default function App() {
             status={status}
             todayLog={todayLog}
             recommendedArticle={recommendedArticle}
+            latestWeight={weightHistory[0] || null}
             onOpenLogToday={() => {
               setSelectedDateKey(todayKey);
               setLogOpen(true);
@@ -1902,13 +2441,17 @@ export default function App() {
         {activeTab === 'profile' && (
           <ProfileTab
             profiles={profiles}
-            activeProfileId={activeProfileId}
+            activeProfileId={activeId}
             setActiveProfileId={setActiveProfileId}
             updateProfile={updateProfile}
             onAddProfile={addProfile}
             onDeleteProfile={deleteProfile}
             onAddDemo={addDemo}
             onReset={resetData}
+            onExport={() => setExportOpen(true)}
+            onImport={() => setImportOpen(true)}
+            lockEnabled={lockConfig.enabled}
+            onOpenPin={() => setPinSheet(lockConfig.enabled ? 'change' : 'setup')}
           />
         )}
       </main>
@@ -1988,6 +2531,45 @@ export default function App() {
             </button>
           </div>
         </div>
+      )}
+
+      {notice && (
+        <div className="fixed bottom-20 inset-x-0 z-[65] flex justify-center px-4 pointer-events-none">
+          <div className="bg-stone-900 text-white text-xs font-medium px-4 py-2.5 rounded-full shadow-lg fade-in max-w-sm text-center">
+            {notice}
+          </div>
+        </div>
+      )}
+
+      {!profile.onboarded && (
+        <WelcomeSheet
+          onFinish={(patch) => updateProfile(patch)}
+          onSkip={() => updateProfile({ onboarded: true })}
+        />
+      )}
+
+      {exportOpen && (
+        <ExportSheet
+          profiles={profiles}
+          activeProfileId={activeId}
+          onClose={() => setExportOpen(false)}
+        />
+      )}
+
+      {importOpen && (
+        <ImportSheet
+          onClose={() => setImportOpen(false)}
+          onReplace={handleReplaceImport}
+          onMerge={handleMergeImport}
+        />
+      )}
+
+      {pinSheet && (
+        <PinSheet
+          mode={pinSheet}
+          onClose={() => setPinSheet(null)}
+          onDone={handlePinDone}
+        />
       )}
     </div>
   );
